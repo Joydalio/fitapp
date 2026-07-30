@@ -81,11 +81,10 @@ Chart.defaults.color = css('--sub');
 Chart.defaults.borderColor = css('--grid');
 Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
 
-const base = extra => Object.assign({
-  responsive: true, maintainAspectRatio: false,
-  plugins: { legend: { display: false } },
-  scales: { x: { grid: { display: false } }, y: { grid: { color: css('--grid') }, border: { display: false } } }
-}, extra);
+const FIT = { responsive: true, maintainAspectRatio: false };
+const NOLEGEND = { legend: { display: false } };
+const yAxis = extra => Object.assign({ grid: { color: css('--grid') }, border: { display: false } }, extra);
+const xAxis = extra => Object.assign({ grid: { display: false } }, extra);
 
 fetch('/api/stats?days=365').then(r => r.json()).then(d => {
   const s = d.summary, imp = d.improvement;
@@ -105,7 +104,9 @@ fetch('/api/stats?days=365').then(r => r.json()).then(d => {
   new Chart(c1, {
     type: 'bar',
     data: { labels: months, datasets: [{ data: d.monthly.map(m => m.distance_m), backgroundColor: css('--accent'), borderRadius: 6 }] },
-    options: base({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.raw.toLocaleString()}m` } } } })
+    options: { ...FIT,
+      plugins: { ...NOLEGEND, tooltip: { callbacks: { label: c => `${c.raw.toLocaleString()}m` } } },
+      scales: { x: xAxis(), y: yAxis() } }
   });
 
   new Chart(c2, {
@@ -119,18 +120,16 @@ fetch('/api/stats?days=365').then(r => r.json()).then(d => {
           pointRadius: 0, borderWidth: 2.5, tension: 0.3, spanGaps: true }
       ]
     },
-    options: base({
-      plugins: { legend: { display: true, labels: { boxWidth: 12, usePointStyle: true } },
+    options: { ...FIT,
+      plugins: { legend: { labels: { boxWidth: 12, usePointStyle: true } },
                  tooltip: { callbacks: { label: c => `${c.dataset.label} ${pace(c.raw)}` } } },
-      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
-                y: { grid: { color: css('--grid') }, border: { display: false }, ticks: { callback: pace } } }
-    })
+      scales: { x: xAxis({ ticks: { maxTicksLimit: 8 } }), y: yAxis({ ticks: { callback: pace } }) } }
   });
 
   new Chart(c3, {
     type: 'bar',
     data: { labels: months, datasets: [{ data: d.monthly.map(m => m.sessions), backgroundColor: css('--accent'), borderRadius: 6 }] },
-    options: base({ scales: { x: { grid: { display: false } }, y: { grid: { color: css('--grid') }, border: { display: false }, ticks: { precision: 0 } } } })
+    options: { ...FIT, plugins: NOLEGEND, scales: { x: xAxis(), y: yAxis({ ticks: { precision: 0 } }) } }
   });
 
   document.getElementById('advice').innerHTML = d.advice.map(a =>

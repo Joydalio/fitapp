@@ -3,7 +3,6 @@ import os
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, Response
@@ -16,7 +15,13 @@ TOKEN = os.environ.get("SWIM_TOKEN", "")
 HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX = os.path.join(HERE, "static", "index.html")
 SHORTCUT = os.path.join(HERE, "swim_shortcut.shortcut")
-FIELDS = ["start", "end", "duration_sec", "distance_m", "energy_kcal", "type", "avg_hr", "location"]
+
+UPSERT = """INSERT INTO workouts
+    VALUES(:start, :end, :duration_sec, :distance_m, :energy_kcal, :type, :avg_hr, :location)
+    ON CONFLICT(start) DO UPDATE SET
+        "end"=excluded."end", duration_sec=excluded.duration_sec, distance_m=excluded.distance_m,
+        energy_kcal=excluded.energy_kcal, type=excluded.type, avg_hr=excluded.avg_hr,
+        location=excluded.location"""
 
 app = FastAPI(title="수영 기록")
 
@@ -50,25 +55,20 @@ init_db()
 
 class Workout(BaseModel):
     """iOS 버전마다 단축어가 주는 필드가 달라서 전부 optional."""
-    start: Optional[str] = None
-    end: Optional[str] = None
-    duration_sec: Optional[float] = None
-    distance_m: Optional[float] = None
-    energy_kcal: Optional[float] = None
-    type: Optional[str] = None
-    avg_hr: Optional[float] = None
-    location: Optional[str] = None
-
-    @field_validator("*", mode="before")
-    @classmethod
-    def blank_to_none(cls, v):
-        # 단축어는 값이 없을 때 "" 를 보낸다. 그대로 두면 422로 그날 전송 전체가 실패함.
-        return None if isinstance(v, str) and not v.strip() else v
+    start: str | None = None
+    end: str | None = None
+    duration_sec: float | None = None
+    distance_m: float | None = None
+    energy_kcal: float | None = None
+    type: str | None = None
+    avg_hr: float | None = None
+    location: str | None = None
 
     @field_validator("duration_sec", "distance_m", "energy_kcal", "avg_hr", mode="before")
     @classmethod
     def strip_units(cls, v, info):
-        # 단축어가 "1,500 m" / "420 kcal" 처럼 단위째 보내는 경우가 있다. 숫자만 뽑는다.
+        # 단축어가 "1,500 m" / "420 kcal" 처럼 단위째 보내거나 빈 문자열을 보낸다. 숫자만 뽑는다.
+        # (그대로 두면 422로 그날 전송 전체가 실패한다.)
         if not isinstance(v, str):
             return v
         m = re.search(r"-?\d+(\.\d+)?", v.replace(",", ""))
@@ -126,18 +126,10 @@ def post_workouts(items: list[dict], x_token: str = Header(default="")):
     if not rows:
         return {"received": len(items), "inserted": 0, "updated": 0, "skipped": len(items)}
 
-    cols = ",".join(f'"{f}"' for f in FIELDS)
-    ph = ",".join("?" for _ in FIELDS)
-    upd = ",".join(f'"{f}"=excluded."{f}"' for f in FIELDS if f != "start")
-    keys = [r["start"] for r in rows]
     with conn() as c:
-        q = f'SELECT start FROM workouts WHERE start IN ({",".join("?" * len(keys))})'
-        existing = {r[0] for r in c.execute(q, keys)}
-        c.executemany(
-            f'INSERT INTO workouts({cols}) VALUES({ph}) ON CONFLICT(start) DO UPDATE SET {upd}',
-            [[r[f] for f in FIELDS] for r in rows],
-        )
-    inserted = sum(1 for k in keys if k not in existing)
+        before = c.execute("SELECT COUNT(*) FROM workouts").fetchone()[0]
+        c.executemany(UPSERT, rows)
+        inserted = c.execute("SELECT COUNT(*) FROM workouts").fetchone()[0] - before
     # skipped > 0 이면 단축어의 날짜 포맷이 ISO 8601이 아닐 가능성이 높다.
     return {"received": len(items), "inserted": inserted,
             "updated": len(rows) - inserted, "skipped": len(items) - len(rows)}
@@ -223,8 +215,6 @@ def stats(days: int = 365):
             "month": local.strftime("%Y-%m"),
             "distance_m": r["distance_m"] or 0,
             "duration_sec": r["duration_sec"] or 0,
-            "energy_kcal": r["energy_kcal"],
-            "avg_hr": r["avg_hr"],
             "pace_sec": pace(r["duration_sec"], r["distance_m"]),
         })
 
