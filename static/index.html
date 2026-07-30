@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>수영 기록</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+:root {
+  --bg: #f5f6f8; --card: #fff; --text: #16181d; --sub: #6b7280;
+  --line: #e5e7eb; --accent: #2b7fff; --warn: #f59e0b; --grid: #eceef1;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1013; --card: #171a1f; --text: #e8eaed; --sub: #9aa1ac;
+    --line: #262b33; --accent: #4d95ff; --warn: #fbbf24; --grid: #232830;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 20px 16px 60px; background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 920px; margin: 0 auto; }
+h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.5px; }
+.sub { color: var(--sub); font-size: 13px; margin: 0 0 20px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+.card .label { font-size: 12px; color: var(--sub); margin-bottom: 6px; }
+.card .value { font-size: 26px; font-weight: 700; letter-spacing: -1px; }
+.card .value small { font-size: 14px; font-weight: 500; color: var(--sub); margin-left: 2px; }
+.up { color: #16a34a; } .down { color: #ef4444; }
+.chart { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+.chart h2 { font-size: 14px; margin: 0 0 2px; font-weight: 600; }
+.chart .hint { font-size: 11px; color: var(--sub); margin: 0 0 12px; }
+.chart .box { position: relative; height: 240px; }
+.get-sc { display: inline-block; margin: 0 0 20px; padding: 9px 14px; border-radius: 10px;
+  background: var(--card); border: 1px solid var(--line); color: var(--accent);
+  text-decoration: none; font-size: 13px; font-weight: 600; }
+.advice { display: grid; gap: 10px; margin-top: 24px; }
+.tip { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 12px; padding: 14px 16px; }
+.tip.warn { border-left-color: var(--warn); }
+.tip .t { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.tip .d { font-size: 13px; color: var(--sub); line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>수영 기록</h1>
+  <p class="sub" id="range">불러오는 중…</p>
+
+  <a class="get-sc" href="/shortcut">📲 아이폰 단축어 받기</a>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="chart">
+    <h2>월별 총 거리</h2><p class="hint">단위: m</p>
+    <div class="box"><canvas id="c1"></canvas></div>
+  </div>
+
+  <div class="chart">
+    <h2>100m 페이스 추이</h2><p class="hint">선이 아래로 내려갈수록 빨라지는 중 ↓</p>
+    <div class="box"><canvas id="c2"></canvas></div>
+  </div>
+
+  <div class="chart">
+    <h2>월별 수영 횟수</h2><p class="hint">단위: 회</p>
+    <div class="box"><canvas id="c3"></canvas></div>
+  </div>
+
+  <div class="advice" id="advice"></div>
+</div>
+
+<script>
+const css = k => getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+const pace = s => s ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : '-';
+const km = m => (m / 1000).toFixed(1);
+
+Chart.defaults.color = css('--sub');
+Chart.defaults.borderColor = css('--grid');
+Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+
+const base = extra => Object.assign({
+  responsive: true, maintainAspectRatio: false,
+  plugins: { legend: { display: false } },
+  scales: { x: { grid: { display: false } }, y: { grid: { color: css('--grid') }, border: { display: false } } }
+}, extra);
+
+fetch('/api/stats?days=365').then(r => r.json()).then(d => {
+  const s = d.summary, imp = d.improvement;
+  document.getElementById('range').textContent = `최근 ${d.days}일 · ${s.sessions}회 기록`;
+
+  const delta = imp.delta_sec;
+  document.getElementById('cards').innerHTML = [
+    ['1년 총 거리', `${km(s.total_distance_m)}<small>km</small>`, ''],
+    ['총 수영 횟수', `${s.sessions}<small>회</small>`, ''],
+    ['평균 100m 페이스', `${pace(s.avg_pace_sec)}<small>최고 ${pace(s.best_pace_sec)}</small>`, ''],
+    ['향상도 (90일)', delta == null ? '-' : `${delta > 0 ? '−' : '+'}${Math.abs(delta).toFixed(1)}<small>초</small>`,
+      delta == null ? '' : (delta > 0 ? 'up' : 'down')]
+  ].map(([l, v, c]) => `<div class="card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
+
+  const months = d.monthly.map(m => m.month.slice(2));
+
+  new Chart(c1, {
+    type: 'bar',
+    data: { labels: months, datasets: [{ data: d.monthly.map(m => m.distance_m), backgroundColor: css('--accent'), borderRadius: 6 }] },
+    options: base({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.raw.toLocaleString()}m` } } } })
+  });
+
+  new Chart(c2, {
+    type: 'line',
+    data: {
+      labels: d.sessions.map(x => x.date.slice(2)),
+      datasets: [
+        { label: '세션', data: d.sessions.map(x => x.pace_sec), borderColor: css('--grid'),
+          backgroundColor: css('--accent'), pointRadius: 3, borderWidth: 1, spanGaps: true },
+        { label: '4주 평균', data: d.sessions.map(x => x.ma4w_sec), borderColor: css('--accent'),
+          pointRadius: 0, borderWidth: 2.5, tension: 0.3, spanGaps: true }
+      ]
+    },
+    options: base({
+      plugins: { legend: { display: true, labels: { boxWidth: 12, usePointStyle: true } },
+                 tooltip: { callbacks: { label: c => `${c.dataset.label} ${pace(c.raw)}` } } },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
+                y: { grid: { color: css('--grid') }, border: { display: false }, ticks: { callback: pace } } }
+    })
+  });
+
+  new Chart(c3, {
+    type: 'bar',
+    data: { labels: months, datasets: [{ data: d.monthly.map(m => m.sessions), backgroundColor: css('--accent'), borderRadius: 6 }] },
+    options: base({ scales: { x: { grid: { display: false } }, y: { grid: { color: css('--grid') }, border: { display: false }, ticks: { precision: 0 } } } })
+  });
+
+  document.getElementById('advice').innerHTML = d.advice.map(a =>
+    `<div class="tip ${a.level}"><div class="t">${a.title}</div><div class="d">${a.detail}</div></div>`).join('');
+});
+</script>
+</body>
+</html>

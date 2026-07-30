@@ -1,0 +1,7 @@
+# 개인 수영 기록 DB - 절대 올리지 않는다
+*.db
+
+.venv/
+__pycache__/
+.pytest_cache/
+.claude/
